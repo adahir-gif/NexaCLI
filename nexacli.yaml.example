@@ -1,0 +1,50 @@
+# nexacli.yaml.example — copy to nexacli.yaml and customise.
+# Full schema reference: https://github.com/adahir-gif/NexaCLI#configuration
+
+# Schema version — always "1" for NexaCLI 2.x
+version: "1"
+
+# Human-readable application name used in deploy output and generated URLs.
+app: my-app
+
+# Cloud provider.  One of: aws | gcp | azure | fly | railway | render
+provider: aws
+
+# Deployment regions.  At least one must be marked primary: true.
+regions:
+  - name: us-east-1
+    primary: true
+  - name: eu-west-1
+    replicas: 2
+
+# Build configuration.
+build:
+  dockerfile: Dockerfile      # path relative to context
+  context: .                  # Docker build context
+  # command: npm run build    # pre-build command (optional)
+  args:
+    NODE_ENV: production
+
+# Health-check endpoint. NexaCLI polls this after every deploy.
+healthcheck:
+  path: /health
+  interval: 30   # seconds between checks
+  timeout: 10    # seconds before a check is considered failed
+  retries: 3
+
+# Autoscaling (not supported on all providers).
+scaling:
+  min: 1
+  max: 5
+  target: 70   # CPU % that triggers a scale-up
+
+# Static environment variables baked into the deployment manifest.
+# For secrets use `nexacli env set` and reference them at runtime.
+env:
+  LOG_LEVEL: info
+  PORT: "8080"
+
+# Arbitrary labels attached to the deployment for filtering/billing.
+labels:
+  team: platform
+  cost-centre: eng-infra
