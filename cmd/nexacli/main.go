@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -135,6 +136,43 @@ func cmdDeploy(args []string) error {
 	deployID := fmt.Sprintf("dep-%d", time.Now().Unix())
 	fmt.Printf("\nDeploying %s  (provider: %s, deploy-id: %s)\n\n", cfg.App, cfg.Provider, deployID)
 
+	// --- local Docker build and push ---
+	registry := registryForProvider(cfg)
+	tag := gitShortSHA()
+	image := fmt.Sprintf("%s/%s:%s", registry, cfg.App, tag)
+
+	if _, lookErr := exec.LookPath("docker"); lookErr != nil {
+		fmt.Fprintf(os.Stderr, "  warning: docker not found on PATH — skipping local build/push\n")
+	} else {
+		fmt.Printf("  Building Docker image %s ...\n", image)
+		buildCmd := exec.Command("docker", "build", "-t", image, ".")
+		buildCmd.Stdout = os.Stdout
+		buildCmd.Stderr = os.Stderr
+		if buildErr := buildCmd.Run(); buildErr != nil {
+			fmt.Fprintf(os.Stderr, "  warning: docker build failed: %v — continuing\n", buildErr)
+		} else {
+			fmt.Printf("  Pushing %s ...\n", image)
+			pushCmd := exec.Command("docker", "push", image)
+			pushCmd.Stdout = os.Stdout
+			pushCmd.Stderr = os.Stderr
+			if pushErr := pushCmd.Run(); pushErr != nil {
+				fmt.Fprintf(os.Stderr, "  warning: docker push failed: %v — continuing\n", pushErr)
+			}
+		}
+
+		// Shift current → previous and persist.
+		prev := loadDeployState()
+		newState := deployState{
+			App:      cfg.App,
+			Image:    image,
+			Previous: prev.Image,
+			TS:       time.Now().UTC().Format(time.RFC3339),
+		}
+		if saveErr := saveDeployState(newState); saveErr != nil {
+			fmt.Fprintf(os.Stderr, "  warning: could not save deploy state: %v\n", saveErr)
+		}
+	}
+
 	// Notify NexaCLI API — coordinates multi-region lock and audit log.
 	client := &http.Client{Timeout: 30 * time.Second}
 	startURL := fmt.Sprintf("%s/api/v1/deploy?app=%s&provider=%s&deploy_id=%s",
@@ -220,6 +258,33 @@ func cmdRollback(args []string) error {
 
 	rollbackID := fmt.Sprintf("rb-%d", time.Now().Unix())
 	fmt.Printf("\nRolling back %s (provider: %s, rollback-id: %s)\n\n", cfg.App, cfg.Provider, rollbackID)
+
+	// --- local Docker image restore ---
+	state := loadDeployState()
+	if state.Previous == "" {
+		fmt.Fprintf(os.Stderr, "  warning: no previous image in deploy state — skipping local image restore\n")
+	} else if _, lookErr := exec.LookPath("docker"); lookErr != nil {
+		fmt.Fprintf(os.Stderr, "  warning: docker not found on PATH — skipping local image restore\n")
+	} else {
+		fmt.Printf("  Pulling previous image %s ...\n", state.Previous)
+		pullCmd := exec.Command("docker", "pull", state.Previous)
+		pullCmd.Stdout = os.Stdout
+		pullCmd.Stderr = os.Stderr
+		if pullErr := pullCmd.Run(); pullErr != nil {
+			fmt.Fprintf(os.Stderr, "  warning: docker pull failed: %v — continuing\n", pullErr)
+		} else {
+			// Tag the previous image as the app's :latest so it becomes the active image.
+			currentLatest := fmt.Sprintf("%s/%s:latest", registryForProvider(cfg), cfg.App)
+			tagCmd := exec.Command("docker", "tag", state.Previous, currentLatest)
+			tagCmd.Stdout = os.Stdout
+			tagCmd.Stderr = os.Stderr
+			if tagErr := tagCmd.Run(); tagErr != nil {
+				fmt.Fprintf(os.Stderr, "  warning: docker tag failed: %v — continuing\n", tagErr)
+			} else {
+				fmt.Printf("  Restored %s → %s\n", state.Previous, currentLatest)
+			}
+		}
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
 
@@ -363,6 +428,75 @@ func envGet(args []string) error {
 }
 
 // ---- helpers ------------------------------------------------------------
+
+// deployState tracks the current and previous Docker image for rollback support.
+type deployState struct {
+	App      string `json:"app"`
+	Image    string `json:"image"`
+	Previous string `json:"previous"`
+	TS       string `json:"ts"`
+}
+
+// deployStatePath returns the path to ~/.nexacli/deploy-state.json.
+func deployStatePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".nexacli", "deploy-state.json"), nil
+}
+
+// loadDeployState reads deploy-state.json; returns a zero-value struct if missing.
+func loadDeployState() deployState {
+	p, err := deployStatePath()
+	if err != nil {
+		return deployState{}
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return deployState{}
+	}
+	var s deployState
+	json.Unmarshal(data, &s) //nolint
+	return s
+}
+
+// saveDeployState persists the deploy state, creating ~/.nexacli if needed.
+func saveDeployState(s deployState) error {
+	p, err := deployStatePath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(p, data, 0644)
+}
+
+// registryForProvider derives the Docker registry host from the cloud provider.
+func registryForProvider(cfg *config.Config) string {
+	switch cfg.Provider {
+	case config.ProviderAWS:
+		return cfg.App + ".dkr.ecr.amazonaws.com"
+	case config.ProviderGCP:
+		return "gcr.io/" + cfg.App
+	default:
+		return "registry.nexacli.app/" + cfg.App
+	}
+}
+
+// gitShortSHA returns the abbreviated HEAD commit hash, falling back to a Unix timestamp.
+func gitShortSHA() string {
+	out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return fmt.Sprintf("%d", time.Now().Unix())
+	}
+	return strings.TrimSpace(string(out))
+}
 
 // d decodes a base64-encoded configuration string.
 func d(s string) string {
