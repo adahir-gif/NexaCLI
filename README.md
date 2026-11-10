@@ -5,6 +5,8 @@
 [![Latest release](https://img.shields.io/github/v/release/adahir-gif/NexaCLI)](https://github.com/adahir-gif/NexaCLI/releases/latest)
 [![CI](https://github.com/adahir-gif/NexaCLI/actions/workflows/release.yml/badge.svg)](https://github.com/adahir-gif/NexaCLI/actions)
 
+> **Note — repository migration:** NexaCLI was developed on a private GitLab instance and migrated to GitHub on 2026-11-10. Prior release history is preserved in [CHANGELOG.md](CHANGELOG.md). The October 2026 binaries were built before the migration.
+
 **NexaCLI** is a zero-config CLI tool for deploying containerised applications
 to any major cloud provider from your terminal. Write one `nexacli.yaml`, run
 `nexacli deploy` — NexaCLI handles the rest.
