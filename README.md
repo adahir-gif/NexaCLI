@@ -37,9 +37,9 @@ Deployment successful! App "my-api" is live.
   sequentially, primary region first.
 - **Safe rollbacks** — `nexacli rollback` reinstates the previous stable image
   across all regions, or just the one you specify with `--region`.
-- **Environment variable management** — `nexacli env set/get` persists secrets
-  to a local `.nexacli-env` file and syncs them to the provider before each
-  deploy.
+- **Environment variable management** — `nexacli env set/get` stores key-value
+  pairs in a local `.nexacli-env` file (plaintext; add it to `.gitignore`) and
+  passes them to the provider over TLS on each deploy.
 - **Dry-run mode** — `nexacli deploy --dry-run` prints the resolved plan
   without touching a single API.
 - **CI-friendly** — structured exit codes, no interactive prompts, and a

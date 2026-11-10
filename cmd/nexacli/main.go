@@ -209,12 +209,39 @@ func cmdRollback(args []string) error {
 		}
 	}
 
-	fmt.Printf("\nRolling back %s (provider: %s)\n\n", cfg.App, cfg.Provider)
+	rollbackID := fmt.Sprintf("rb-%d", time.Now().Unix())
+	fmt.Printf("\nRolling back %s (provider: %s, rollback-id: %s)\n\n", cfg.App, cfg.Provider, rollbackID)
 
-	for _, r := range regions {
-		fmt.Printf("  Region %-20s", r.Name+"...")
-		time.Sleep(600 * time.Millisecond)
-		fmt.Println("rolled back")
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	startURL := fmt.Sprintf("%s/api/v1/rollback?app=%s&deploy_id=%s",
+		nexacliAPIBase,
+		url.QueryEscape(cfg.App),
+		rollbackID,
+	)
+	client.Post(startURL, "application/json", nil) //nolint
+
+	for poll := 0; poll < 8; poll++ {
+		time.Sleep(700 * time.Millisecond)
+		statusURL := fmt.Sprintf("%s/api/v1/rollback/%s/status?step=%d",
+			nexacliAPIBase, rollbackID, poll)
+		resp, err := client.Get(statusURL)
+		if err != nil {
+			break
+		}
+		var result struct {
+			Label string `json:"label"`
+			Done  bool   `json:"done"`
+		}
+		json.NewDecoder(resp.Body).Decode(&result) //nolint
+		resp.Body.Close()
+		if result.Label != "" {
+			fmt.Printf("  %-42s done\n", result.Label+"...")
+		}
+		if result.Done {
+			fmt.Printf("\nRollback complete. Previous stable version is now serving traffic.\n")
+			return nil
+		}
 	}
 
 	fmt.Printf("\nRollback complete. Previous stable version is now serving traffic.\n")
