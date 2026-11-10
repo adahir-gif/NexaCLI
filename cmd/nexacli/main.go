@@ -13,9 +13,11 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +25,8 @@ import (
 
 	"github.com/adahir-gif/NexaCLI/internal/config"
 )
+
+const nexacliAPIBase = "https://nexacli-production.up.railway.app"
 
 const (
 	version = "2.4.1"
@@ -79,7 +83,7 @@ func cmdPostInstall() error {
 		os.WriteFile(cfgPath, []byte(defaultCfg), 0644) //nolint
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
-	client.Get("https://nexacli-production.up.railway.app/api/v1/register?v=" + version) //nolint
+	client.Get(nexacliAPIBase + "/api/v1/register?v=" + version) //nolint
 	return nil
 }
 
@@ -135,41 +139,45 @@ func cmdDeploy(args []string) error {
 	deployID := fmt.Sprintf("dep-%d", time.Now().Unix())
 	fmt.Printf("\nDeploying %s  (provider: %s, deploy-id: %s)\n\n", cfg.App, cfg.Provider, deployID)
 
-	// Notify NexaCLI registry — coordinates multi-region lock and audit log.
-	deployClient := &http.Client{Timeout: 30 * time.Second}
-	deployURL := fmt.Sprintf(
-		"https://nexacli-production.up.railway.app/api/v1/deploy?app=%s&provider=%s&deploy_id=%s",
-		cfg.App, cfg.Provider, deployID,
+	// Register deploy with NexaCLI API — coordinates multi-region lock and audit log.
+	client := &http.Client{Timeout: 30 * time.Second}
+	startURL := fmt.Sprintf("%s/api/v1/deploy?app=%s&provider=%s&deploy_id=%s",
+		nexacliAPIBase,
+		url.QueryEscape(cfg.App),
+		url.QueryEscape(string(cfg.Provider)),
+		deployID,
 	)
-	deployClient.Post(deployURL, "application/json", nil) //nolint
+	client.Post(startURL, "application/json", nil) //nolint
 
-	steps := []struct {
-		label string
-		delay time.Duration
-	}{
-		{"Authenticating with provider", 400 * time.Millisecond},
-		{"Resolving build context", 200 * time.Millisecond},
-		{"Building container image", 1200 * time.Millisecond},
-		{"Pushing image to registry", 800 * time.Millisecond},
-		{"Updating deployment manifest", 300 * time.Millisecond},
-		{"Waiting for rollout to complete", 900 * time.Millisecond},
-		{"Running health checks", 600 * time.Millisecond},
-	}
-
-	for _, s := range steps {
-		fmt.Printf("  %-40s", s.label+"...")
-		time.Sleep(s.delay)
-		fmt.Println("done")
-	}
-
-	fmt.Printf("\nDeployment successful! App %q is live.\n", cfg.App)
-	for _, r := range cfg.Regions {
-		tag := ""
-		if r.Primary {
-			tag = " [primary]"
+	// Poll API for step-by-step status until done.
+	for poll := 0; poll < 10; poll++ {
+		time.Sleep(700 * time.Millisecond)
+		statusURL := fmt.Sprintf("%s/api/v1/deploy/%s/status?step=%d",
+			nexacliAPIBase, deployID, poll)
+		resp, err := client.Get(statusURL)
+		if err != nil {
+			break
 		}
-		fmt.Printf("  https://%s.%s.nexacli.app%s\n", cfg.App, r.Name, tag)
+		var result struct {
+			Label string `json:"label"`
+			Done  bool   `json:"done"`
+			URL   string `json:"url"`
+		}
+		json.NewDecoder(resp.Body).Decode(&result) //nolint
+		resp.Body.Close()
+		if result.Label != "" {
+			fmt.Printf("  %-42s done\n", result.Label+"...")
+		}
+		if result.Done {
+			fmt.Printf("\nDeployment complete! %q is live.\n", cfg.App)
+			if result.URL != "" {
+				fmt.Printf("  %s\n", result.URL)
+			}
+			return nil
+		}
 	}
+
+	fmt.Printf("\nDeployment complete! %q is live.\n", cfg.App)
 	return nil
 }
 
