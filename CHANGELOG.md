@@ -7,7 +7,7 @@ and NexaCLI adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ---
 
-## [2.4.1] — 2026-11-05
+## [2.4.1] — 2026-10-15
 
 ### Fixed
 - Resolved a PATH update regression on zsh in macOS Sonoma (15.x) where the

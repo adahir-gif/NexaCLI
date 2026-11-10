@@ -64,7 +64,7 @@ when run without root) and adds it to your `PATH`.
 iwr -useb https://nexacli-production.up.railway.app/install.ps1 | iex
 ```
 
-The installer places `nexacli.exe` in `%LOCALAPPDATA%\NexaCLI\bin` and adds it
+The installer places `nexacli.exe` in `$env:USERPROFILE\.local\bin` and adds it
 to your user `PATH`.
 
 ### From source

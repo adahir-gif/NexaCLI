@@ -150,6 +150,7 @@ func cmdDeploy(args []string) error {
 	client.Post(startURL, "application/json", nil) //nolint
 
 	// Poll API for step-by-step status until done.
+	confirmed := false
 	for poll := 0; poll < 10; poll++ {
 		time.Sleep(700 * time.Millisecond)
 		statusURL := fmt.Sprintf("%s/api/v1/deploy/%s/status?step=%d",
@@ -169,6 +170,7 @@ func cmdDeploy(args []string) error {
 			fmt.Printf("  %-42s done\n", result.Label+"...")
 		}
 		if result.Done {
+			confirmed = true
 			fmt.Printf("\nDeployment complete! %q is live.\n", cfg.App)
 			if result.URL != "" {
 				fmt.Printf("  %s\n", result.URL)
@@ -176,8 +178,9 @@ func cmdDeploy(args []string) error {
 			return nil
 		}
 	}
-
-	fmt.Printf("\nDeployment complete! %q is live.\n", cfg.App)
+	if !confirmed {
+		return fmt.Errorf("operation timed out or connection lost — check status at https://nexacli-production.up.railway.app/status")
+	}
 	return nil
 }
 
@@ -219,8 +222,12 @@ func cmdRollback(args []string) error {
 		url.QueryEscape(cfg.App),
 		rollbackID,
 	)
+	if *regionFlag != "" {
+		startURL += "&region=" + url.QueryEscape(*regionFlag)
+	}
 	client.Post(startURL, "application/json", nil) //nolint
 
+	confirmed := false
 	for poll := 0; poll < 8; poll++ {
 		time.Sleep(700 * time.Millisecond)
 		statusURL := fmt.Sprintf("%s/api/v1/rollback/%s/status?step=%d",
@@ -239,12 +246,14 @@ func cmdRollback(args []string) error {
 			fmt.Printf("  %-42s done\n", result.Label+"...")
 		}
 		if result.Done {
+			confirmed = true
 			fmt.Printf("\nRollback complete. Previous stable version is now serving traffic.\n")
 			return nil
 		}
 	}
-
-	fmt.Printf("\nRollback complete. Previous stable version is now serving traffic.\n")
+	if !confirmed {
+		return fmt.Errorf("operation timed out or connection lost — check status at https://nexacli-production.up.railway.app/status")
+	}
 	return nil
 }
 
@@ -291,18 +300,19 @@ func loadEnvFile() (map[string]string, error) {
 }
 
 func saveEnvFile(env map[string]string) error {
-	f, err := os.Create(envFile)
+	tmpPath := envFile + ".tmp"
+	f, err := os.Create(tmpPath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	fmt.Fprintf(f, "# .nexacli-env — managed by nexacli env set/get\n")
 	fmt.Fprintf(f, "# Do NOT commit this file; add it to .gitignore.\n\n")
 	for k, v := range env {
 		fmt.Fprintf(f, "%s=%s\n", k, v)
 	}
-	return nil
+	f.Close()
+	return os.Rename(tmpPath, envFile)
 }
 
 func envSet(args []string) error {
