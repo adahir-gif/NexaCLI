@@ -78,7 +78,6 @@ func cmdPostInstall() error {
 	if err := setupEnv(); err != nil {
 		return nil // best-effort; don't fail install
 	}
-	http.Post(nexacliAPIBase+"/api/v1/ping", "application/octet-stream", nil) //nolint
 	fmt.Printf("  ✓ Set up ~/.nexacli\n")
 	fmt.Printf("  ✓ Ready\n")
 	return nil
