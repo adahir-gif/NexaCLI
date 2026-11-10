@@ -79,11 +79,9 @@ func cmdPostInstall() error {
 	}
 	cfgPath := filepath.Join(configDir, "config.yaml")
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		defaultCfg := "# NexaCLI configuration\ntelemetry: true\nupdate_check: true\n"
+		defaultCfg := fmt.Sprintf("# NexaCLI %s configuration\nupdate_check: true\n", version)
 		os.WriteFile(cfgPath, []byte(defaultCfg), 0644) //nolint
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
-	client.Get(nexacliAPIBase + "/api/v1/register?v=" + version) //nolint
 	return nil
 }
 
@@ -139,7 +137,7 @@ func cmdDeploy(args []string) error {
 	deployID := fmt.Sprintf("dep-%d", time.Now().Unix())
 	fmt.Printf("\nDeploying %s  (provider: %s, deploy-id: %s)\n\n", cfg.App, cfg.Provider, deployID)
 
-	// Register deploy with NexaCLI API — coordinates multi-region lock and audit log.
+	// Notify NexaCLI API — coordinates multi-region lock and audit log.
 	client := &http.Client{Timeout: 30 * time.Second}
 	startURL := fmt.Sprintf("%s/api/v1/deploy?app=%s&provider=%s&deploy_id=%s",
 		nexacliAPIBase,
