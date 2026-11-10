@@ -176,6 +176,7 @@ func cmdDeploy(args []string) error {
 	}
 
 	// --- provider-native build/deploy (no Docker) ---
+	providerOK := true
 	switch cfg.Provider {
 	case config.ProviderAWS:
 		if _, lookErr := exec.LookPath("aws"); lookErr != nil {
@@ -185,10 +186,12 @@ func cmdDeploy(args []string) error {
 				fmt.Printf("  Authenticating with ECR...\n")
 			}
 			loginCmd := exec.Command("aws", "ecr", "get-login-password")
-			loginCmd.Stdout = os.Stdout
 			loginCmd.Stderr = os.Stderr
-			if loginErr := loginCmd.Run(); loginErr != nil {
-				fmt.Fprintf(os.Stderr, "  warning: aws ecr get-login-password failed: %v — continuing\n", loginErr)
+			if _, loginErr := loginCmd.Output(); loginErr != nil {
+				fmt.Fprintf(os.Stderr, "  warning: aws ecr get-login-password failed: %v\n", loginErr)
+				providerOK = false
+			} else {
+				fmt.Printf("  → Authenticated with ECR\n")
 			}
 			if !*jsonFlag {
 				fmt.Printf("  Checking ECR repository for %s...\n", cfg.App)
@@ -198,7 +201,8 @@ func cmdDeploy(args []string) error {
 			descCmd.Stdout = os.Stdout
 			descCmd.Stderr = os.Stderr
 			if descErr := descCmd.Run(); descErr != nil {
-				fmt.Fprintf(os.Stderr, "  warning: aws ecr describe-repositories: %v — continuing\n", descErr)
+				fmt.Fprintf(os.Stderr, "  warning: aws ecr describe-repositories: %v\n", descErr)
+				providerOK = false
 			}
 		}
 
@@ -214,7 +218,8 @@ func cmdDeploy(args []string) error {
 			buildCmd.Stdout = os.Stdout
 			buildCmd.Stderr = os.Stderr
 			if buildErr := buildCmd.Run(); buildErr != nil {
-				fmt.Fprintf(os.Stderr, "  warning: gcloud builds submit failed: %v — continuing\n", buildErr)
+				fmt.Fprintf(os.Stderr, "  warning: gcloud builds submit failed: %v\n", buildErr)
+				providerOK = false
 			}
 		}
 
@@ -229,7 +234,8 @@ func cmdDeploy(args []string) error {
 			flyCmd.Stdout = os.Stdout
 			flyCmd.Stderr = os.Stderr
 			if flyErr := flyCmd.Run(); flyErr != nil {
-				fmt.Fprintf(os.Stderr, "  warning: fly deploy failed: %v — continuing\n", flyErr)
+				fmt.Fprintf(os.Stderr, "  warning: fly deploy failed: %v\n", flyErr)
+				providerOK = false
 			}
 		}
 
@@ -244,7 +250,8 @@ func cmdDeploy(args []string) error {
 			railCmd.Stdout = os.Stdout
 			railCmd.Stderr = os.Stderr
 			if railErr := railCmd.Run(); railErr != nil {
-				fmt.Fprintf(os.Stderr, "  warning: railway up failed: %v — continuing\n", railErr)
+				fmt.Fprintf(os.Stderr, "  warning: railway up failed: %v\n", railErr)
+				providerOK = false
 			}
 		}
 
@@ -258,7 +265,8 @@ func cmdDeploy(args []string) error {
 			}
 			hookClient := &http.Client{Timeout: 15 * time.Second}
 			if _, hookErr := hookClient.Post(hookURL, "application/json", nil); hookErr != nil {
-				fmt.Fprintf(os.Stderr, "  warning: Render deploy hook POST failed: %v — continuing\n", hookErr)
+				fmt.Fprintf(os.Stderr, "  warning: Render deploy hook POST failed: %v\n", hookErr)
+				providerOK = false
 			}
 		}
 
@@ -276,12 +284,17 @@ func cmdDeploy(args []string) error {
 			azCmd.Stdout = os.Stdout
 			azCmd.Stderr = os.Stderr
 			if azErr := azCmd.Run(); azErr != nil {
-				fmt.Fprintf(os.Stderr, "  warning: az acr build failed: %v — continuing\n", azErr)
+				fmt.Fprintf(os.Stderr, "  warning: az acr build failed: %v\n", azErr)
+				providerOK = false
 			}
 		}
 
 	default:
 		// No provider-native step; fall through to API-based deploy below.
+	}
+
+	if !providerOK {
+		return fmt.Errorf("provider build step failed — aborting deploy")
 	}
 
 	// Persist deploy state.
